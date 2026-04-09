@@ -12,7 +12,7 @@ from collections import Counter
 
 # 1. 보안 및 기본 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-st.set_page_config(page_title="Trend Radar v4.1", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Trend Radar v4.2", layout="wide", initial_sidebar_state="expanded")
 
 # Secrets 연동
 try:
@@ -42,7 +42,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Trend Radar v4.1")
+st.title("🚀 Trend Radar v4.2")
 
 # 3. 데이터 수집 및 분석 함수들
 @st.cache_data(show_spinner=False)
@@ -50,7 +50,7 @@ def get_ad_suggestions(main_word):
     url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={main_word}"
     try:
         res = requests.get(url, timeout=5).json()[1]
-        return res[:10] if res else [f"{main_word} 추천", f"{main_word} 가격", f"{main_word} 효과"]
+        return res[:10] if res else [f"{main_word} 추천", f"{main_word} 효과"]
     except: return []
 
 def extract_main_keywords(titles, current_keyword):
@@ -70,32 +70,4 @@ def get_naver_search_trend(keyword, days):
     headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET, "Content-Type": "application/json"}
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body))
-        if res.status_code == 200: return pd.DataFrame(res.json()['results'][0]['data'])
-    except: pass
-    return pd.DataFrame()
-
-def get_naver_shopping_trend(keyword, days, cat_id):
-    url = "https://openapi.naver.com/v1/datalab/shopping/category/keywords"
-    end_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-    body = {"startDate": start_date, "endDate": end_date, "timeUnit": "date", "category": cat_id, "keyword": [{"name": keyword, "param": [keyword]}]}
-    headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET, "Content-Type": "application/json"}
-    try:
-        res = requests.post(url, headers=headers, data=json.dumps(body))
-        if res.status_code == 200: return pd.DataFrame(res.json()['results'][0]['data'])
-    except: pass
-    return pd.DataFrame()
-
-def fetch_combined_news(query, days):
-    results = []
-    g_url = f"https://news.google.com/rss/search?q={query}+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
-    try:
-        res = requests.get(g_url, timeout=10, verify=False)
-        items = re.findall(r"<item>(.*?)</item>", res.text, re.DOTALL)
-        for item in items: 
-            t_match = re.search(r"<title>(.*?)</title>", item)
-            l_match = re.search(r"<link>(.*?)</link>", item)
-            s_match = re.search(r"<source.*?>(.*?)</source>", item)
-            pd_match = re.search(r"<pubDate>(.*?)</pubDate>", item)
-            if t_match and l_match:
-                title = t_match.group(1).replace("<![CDATA[", "").replace("]]>",
+        if res.status_code == 200: return
