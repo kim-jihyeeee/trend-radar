@@ -12,14 +12,14 @@ from collections import Counter
 
 # 1. 보안 및 기본 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-st.set_page_config(page_title="Trend Radar v3.1", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Trend Radar v3.2", layout="wide", initial_sidebar_state="expanded")
 
 # Secrets 연동
 try:
     NAVER_CLIENT_ID = st.secrets["NAVER_CLIENT_ID"]
     NAVER_CLIENT_SECRET = st.secrets["NAVER_CLIENT_SECRET"]
 except:
-    st.error("⚠️ Secrets 설정 확인 필요")
+    st.error("⚠️ Secrets 설정 확인 필요 (NAVER_CLIENT_ID, NAVER_CLIENT_SECRET)")
 
 # 상태값 초기화
 if 'view_mode' not in st.session_state: st.session_state.view_mode = 'main'
@@ -39,31 +39,15 @@ st.markdown("""
         border-radius: 8px !important; font-weight: bold !important; font-size: 16px !important;
     }
     [data-testid="stSidebarNav"] { display: none; }
+    .stMetric { background-color: #f8f9fa; padding: 10px; border-radius: 10px; border: 1px solid #eee; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Trend Radar v3.1")
+st.title("🚀 Trend Radar v3.2")
 
-# 3. 함수 정의
-@st.cache_data(show_spinner=False)
-def get_ad_suggestions(main_word):
-    url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={main_word}"
-    try:
-        response = requests.get(url, timeout=5)
-        suggestions = response.json()[1] 
-        return suggestions[:10] if suggestions else [f"{main_word} 후기", f"{main_word} 가격"]
-    except: return ["데이터 오류"]
-
-def extract_main_keywords(titles, current_keyword):
-    words = []
-    stop_words = [current_keyword, '뉴스', '연합뉴스', '조선일보', '중앙일보', '동아일보', '경향신문', '한겨레', '매일경제', '한국경제', 'YTN', 'SBS', 'KBS', 'MBC', 'JTBC', '뉴시스', '뉴스핌', '데일리', '기자', '기사', '출시', '개최', '진행']
-    for title in titles:
-        clean_title = re.sub(r'[^\w\s]', ' ', title.split(' - ')[0])
-        for word in clean_title.split():
-            if len(word) > 1 and word not in stop_words: words.append(word)
-    return [w for w, c in Counter(words).most_common(5)]
-
-def get_naver_datalab(keyword, days):
+# 3. 데이터 수집 함수들
+@st.cache_data(ttl=3600)
+def get_naver_search_trend(keyword, days):
     url = "https://openapi.naver.com/v1/datalab/search"
     end_date = datetime.datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
@@ -77,6 +61,33 @@ def get_naver_datalab(keyword, days):
         if res.status_code == 200: return pd.DataFrame(res.json()['results'][0]['data'])
     except: pass
     return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_naver_shopping_trend(keyword, days):
+    url = "https://openapi.naver.com/v1/datalab/shopping/category/keywords"
+    end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+    # 식품(50000006) -> 건강식품(50000030) 카테고리 기준 예시
+    body = {
+        "startDate": start_date, "endDate": end_date, "timeUnit": "date",
+        "category": "50000030", 
+        "keyword": [{"name": keyword, "param": [keyword]}]
+    }
+    headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET, "Content-Type": "application/json"}
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(body))
+        if res.status_code == 200: return pd.DataFrame(res.json()['results'][0]['data'])
+    except: pass
+    return pd.DataFrame()
+
+@st.cache_data(show_spinner=False)
+def get_related_keywords(word, count=15):
+    # 구글 제안어 API 활용 (네이버 연관검색어는 API 비공개이므로 대체)
+    url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={word}"
+    try:
+        res = requests.get(url, timeout=5).json()[1]
+        return res[:count] if res else [f"{word} 추천", f"{word} 효과", f"{word} 가격"]
+    except: return []
 
 def fetch_news_data(query, days):
     results = []
@@ -99,13 +110,20 @@ def fetch_news_data(query, days):
     except: pass
     return results
 
-# 4. 사이드바
+# 4. 사이드바 (프로필 로고 복구)
 with st.sidebar:
     try:
         with open("profile.jpg", "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
-            st.markdown(f'<div style="text-align:center"><img src="data:image/jpeg;base64,{b64}" style="width:120px;border-radius:50%"></div>', unsafe_allow_html=True)
-    except: pass
+            st.markdown(f"""
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <img src="data:image/jpeg;base64,{b64}" style="width: 120px; height: 120px; border-radius: 50%; object-fit: cover;">
+                    <div style="margin-top: 10px; font-size: 18px; font-weight: bold; color: #333;">🔥 Trend Radar</div>
+                </div>
+                """, unsafe_allow_html=True)
+    except: 
+        st.markdown('<div style="text-align:center; font-weight:bold; margin-bottom:20px;">🔥 Trend Radar</div>', unsafe_allow_html=True)
+
     with st.form("search_form"):
         st.header("🔎 분석 설정")
         keyword_input = st.text_input("분석 키워드 입력", value=st.session_state.keyword)
@@ -115,50 +133,48 @@ with st.sidebar:
             st.session_state.keyword = keyword_input
             st.session_state.view_mode = 'main'
 
-# 5. 메인 로직
+# 5. 메인 화면 로직
 if st.session_state.keyword:
-    tab1, tab2 = st.tabs(["📊 네이버 트렌드", "📰 실시간 뉴스 및 키워드"])
+    tab1, tab2 = st.tabs(["📊 네이버 데이터랩 트렌드", "📰 실시간 뉴스 및 이슈"])
     
     with tab1:
-        st.subheader(f"📈 '{st.session_state.keyword}' 검색량 추이")
-        df_trend = get_naver_datalab(st.session_state.keyword, days)
-        if not df_trend.empty:
-            df_trend['period'] = pd.to_datetime(df_trend['period'])
-            df_trend = df_trend.rename(columns={'ratio': '지수', 'period': '날짜'})
-            st.line_chart(df_trend.set_index('날짜'))
-            
-            # 정보 보강: 통계표 추가
-            st.markdown("#### 📋 기간 내 트렌드 요약")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("평균 지수", round(df_trend['지수'].mean(), 1))
-            col2.metric("최고 지수", df_trend['지수'].max())
-            col3.metric("최저 지수", df_trend['지수'].min())
-        else: st.warning("네이버 데이터를 불러올 수 없습니다.")
+        # 화면을 왼쪽(검색) / 오른쪽(쇼핑)으로 분할
+        col_left, col_right = st.columns(2)
+        
+        # --- [왼쪽] 데이터랩 검색어 트렌드 ---
+        with col_left:
+            st.subheader("🔍 검색어 트렌드")
+            df_search = get_naver_search_trend(st.session_state.keyword, days)
+            if not df_search.empty:
+                df_search['period'] = pd.to_datetime(df_search['period'])
+                st.line_chart(df_search.rename(columns={'ratio': '검색량 지수'}).set_index('period')['검색량 지수'])
+                
+                st.markdown("##### 🔝 검색 연관 키워드 (Top 15)")
+                related_search = get_related_keywords(st.session_state.keyword, 15)
+                for i, rk in enumerate(related_search):
+                    st.write(f"{i+1}. {rk}")
+            else: st.warning("검색 데이터를 불러오지 못했습니다.")
+
+        # --- [오른쪽] 데이터랩 쇼핑 인사이트 ---
+        with col_right:
+            st.subheader("🛒 쇼핑 클릭 트렌드")
+            df_shop = get_naver_shopping_trend(st.session_state.keyword, days)
+            if not df_shop.empty:
+                df_shop['period'] = pd.to_datetime(df_shop['period'])
+                st.line_chart(df_shop.rename(columns={'ratio': '클릭량 지수'}).set_index('period')['클릭량 지수'], color="#FF4B4B")
+                
+                st.markdown("##### 🛍️ 쇼핑 연관 키워드 (Top 15)")
+                # 쇼핑 특화 연관 키워드 (검색어와 비슷하지만 쇼핑 의도 강조)
+                related_shop = get_related_keywords(f"쇼핑 {st.session_state.keyword}", 15)
+                for i, rk in enumerate(related_shop):
+                    st.write(f"{i+1}. {rk.replace('쇼핑 ', '')}")
+            else: st.info("쇼핑 데이터를 불러오지 못했습니다. (카테고리 매칭 필요)")
 
     with tab2:
         news_data = fetch_news_data(st.session_state.keyword, days)
         if news_data:
             df_news = pd.DataFrame(news_data).sort_values(by="날짜", ascending=False)
-            
-            # --- 이슈 키워드 추출 & 롱테일 섹션 (부활!) ---
-            top_words = extract_main_keywords(df_news['제목'].tolist(), st.session_state.keyword)
-            if top_words:
-                st.subheader("📌 뉴스 속 이슈 키워드 (클릭시 롱테일 확장)")
-                cols = st.columns(len(top_words))
-                for i, w in enumerate(top_words):
-                    if cols[i].button(f"#{w}", key=f"btn_{w}", use_container_width=True):
-                        st.session_state.view_mode = 'detail'
-                        st.session_state.selected_keyword = w
-                
-                if st.session_state.view_mode == 'detail':
-                    st.info(f"💡 '{st.session_state.selected_keyword}' 관련 추천 롱테일 키워드")
-                    suggestions = get_ad_suggestions(st.session_state.selected_keyword)
-                    s_cols = st.columns(2)
-                    for idx, s in enumerate(suggestions): s_cols[idx%2].code(s)
-                    if st.button("닫기"): st.session_state.view_mode = 'main'; st.rerun()
-            
-            st.divider()
-            st.subheader("📰 실시간 뉴스 리스트")
+            st.subheader(f"📰 '{st.session_state.keyword}' 뉴스 리스트")
             st.dataframe(df_news, use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("링크", display_text="🔗 보기")})
             
             output = io.BytesIO()
