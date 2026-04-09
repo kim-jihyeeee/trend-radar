@@ -12,7 +12,7 @@ from collections import Counter
 # 1. 보안 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 2. 페이지 기본 설정 (사이드바 상태를 'expanded'로 강제하여 일단 보이게 시작)
+# 2. 페이지 기본 설정
 st.set_page_config(
     page_title="Trend Radar v2.0", 
     layout="wide",
@@ -27,13 +27,30 @@ if 'selected_keyword' not in st.session_state:
 if 'keyword' not in st.session_state:
     st.session_state.keyword = ""
 
-# 3. UI 디자인 커스텀
+# 3. UI 디자인 및 아이콘 오류 강제 수정
 st.markdown("""
     <style>
-    /* 상단 메뉴바의 불필요한 요소만 제거하고 '열기/닫기' 아이콘은 살려둡니다 */
+    /* 1. 아이콘 텍스트 오류(keyboard_double...) 강제 삭제 */
+    header[data-testid="stHeader"] span {
+        display: none !important;
+    }
+    
+    /* 2. 대신 그 자리에 우리가 직접 만든 삼선(≡) 아이콘 넣기 */
+    header[data-testid="stHeader"]::before {
+        content: '☰'; /* 삼선 아이콘 */
+        position: absolute;
+        left: 15px;
+        top: 15px;
+        font-size: 24px;
+        color: #FFB300;
+        font-weight: bold;
+        z-index: 999;
+    }
+
+    /* 3. 사이드바 내부 상단 거슬리는 글자 삭제 */
     [data-testid="stSidebarNav"] { display: none; }
     
-    /* 텍스트 입력창 디자인 커스텀 */
+    /* 4. 입력창 디자인 */
     div[data-testid="stTextInput"] input {
         background-color: #FFF4CE !important;
         border: 3px solid #FFB300 !important;
@@ -42,14 +59,13 @@ st.markdown("""
         color: #333333 !important;
         font-size: 16px !important;
     }
-    
-    /* 모바일에서 결과 표 여백 조정 */
+
+    /* 5. 모바일 최적화 여백 */
     @media (max-width: 768px) {
         .main .block-container {
-            padding: 1rem 0.5rem !important;
+            padding: 2rem 0.8rem !important;
         }
-        /* 모바일에서 제목 크기 살짝 조정 */
-        h1 { font-size: 1.8rem !important; }
+        h1 { font-size: 1.6rem !important; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -161,9 +177,8 @@ if st.session_state.keyword:
             top_words = extract_main_keywords(df['제목'].tolist(), st.session_state.keyword)
             if top_words:
                 st.subheader("📌 핵심 키워드")
-                cols = st.columns(len(top_words))
-                for i, w in enumerate(top_words):
-                    if cols[i].button(f"#{w}", key=f"kw_{w}", use_container_width=True):
+                for w in top_words:
+                    if st.button(f"#{w}", key=f"kw_{w}", use_container_width=True):
                         st.session_state.view_mode = 'detail'
                         st.session_state.selected_keyword = w
                         st.rerun()
@@ -178,4 +193,4 @@ if st.session_state.keyword:
             st.download_button(label="📥 리포트 다운로드", data=output.getvalue(), file_name=f"TrendRadar_{st.session_state.keyword}.xlsx", use_container_width=True)
     else: st.warning("결과가 없습니다.")
 else:
-    st.info("👈 왼쪽 사이드바(메뉴)에서 키워드를 입력하고 레이더를 돌려주세요!")
+    st.info("👈 왼쪽 사이드바에서 키워드를 입력하고 레이더를 돌려주세요!")
