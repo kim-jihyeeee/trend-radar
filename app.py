@@ -90,10 +90,91 @@ def get_ad_suggestions(main_word):
         response = requests.get(url, headers=headers, timeout=5)
         suggestions = response.json()[1] 
         result = [kw for kw in suggestions if kw != main_word][:10]
-        return result if result else [f"{main_word} 추천", f"{main_word} 후기", f"{main_word} 가격"]
-    except: return ["데이터 오류 발생"]
+        if result:
+            return result
+        else:
+            return [f"{main_word} 추천", f"{main_word} 후기", f"{main_word} 가격"]
+    except:
+        return ["데이터 오류 발생"]
 
 def extract_main_keywords(titles, current_keyword):
     words = []
     stop_words = [current_keyword, '뉴스', 'com', 'daum', 'naver', '연합뉴스', '뉴스1', '조선일보', '중앙일보', '동아일보', '경향신문', '한겨레', '매일경제', '한국경제', 'YTN', 'SBS', 'KBS', 'MBC', 'JTBC', '뉴시스', '뉴스핌', '데일리', '기자', '기사']
     for title in titles:
+        clean_title = title.split(' - ')[0].split(' | ')[0]
+        clean_title = re.sub(r'[^\w\s]', ' ', clean_title)
+        for word in clean_title.split():
+            if len(word) > 1 and word not in stop_words:
+                words.append(word)
+    return [w for w, c in Counter(words).most_common(5)]
+
+def fetch_data(query, days):
+    results = []
+    url = f"https://news.google.com/rss/search?q={query}+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
+    try:
+        res = requests.get(url, timeout=15, verify=False)
+        items = re.findall(r"<item>(.*?)</item>", res.text, re.DOTALL)
+        for item in items: 
+            t = re.search(r"<title>(.*?)</title>", item)
+            l = re.search(r"<link>(.*?)</link>", item)
+            s = re.search(r"<source.*?>(.*?)</source>", item)
+            pd_match = re.search(r"<pubDate>(.*?)</pubDate>", item)
+            date_str = "알 수 없음"
+            if pd_match:
+                try:
+                    dt = parsedate_to_datetime(pd_match.group(1))
+                    kst_tz = datetime.timezone(datetime.timedelta(hours=9))
+                    date_str = dt.astimezone(kst_tz).strftime("%Y-%m-%d %H:%M")
+                except:
+                    pass
+            if t and l:
+                results.append({
+                    "플랫폼": "구글 뉴스", 
+                    "출처": s.group(1) if s else "뉴스",
+                    "제목": t.group(1).replace("<![CDATA[", "").replace("]]>", ""),
+                    "날짜": date_str, 
+                    "URL": l.group(1)
+                })
+    except:
+        pass
+    return results
+
+# 5. 화면 렌더링 로직
+if st.session_state.keyword:
+    with st.spinner(f"📡 '{st.session_state.keyword}' 데이터 분석 중..."):
+        data = fetch_data(st.session_state.keyword, days)
+    if data:
+        df = pd.DataFrame(data)
+        if "날짜" in df.columns:
+            df = df.sort_values(by="날짜", ascending=False).reset_index(drop=True)
+        if st.session_state.view_mode == 'detail':
+            st.divider()
+            if st.button("⬅️ 뒤로가기", use_container_width=True):
+                st.session_state.view_mode = 'main'
+                st.rerun()
+            st.success(f"💡 **'{st.session_state.selected_keyword}'** 롱테일 키워드")
+            ad_words = get_ad_suggestions(st.session_state.selected_keyword)
+            cols = st.columns(2)
+            for idx, aw in enumerate(ad_words):
+                if aw:
+                    cols[idx % 2].code(aw)
+        else:
+            top_words = extract_main_keywords(df['제목'].tolist(), st.session_state.keyword)
+            if top_words:
+                st.subheader("📌 핵심 키워드")
+                for w in top_words:
+                    if st.button(f"#{w}", key=f"kw_{w}", use_container_width=True):
+                        st.session_state.view_mode = 'detail'
+                        st.session_state.selected_keyword = w
+                        st.rerun()
+                st.divider()
+            st.subheader(f"📊 분석 결과 (총 {len(df)}건)")
+            st.dataframe(df, use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("링크", display_text="🔗 보기")})
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='Report')
+            st.download_button(label=f"📥 리포트 다운로드", data=output.getvalue(), file_name=f"TrendRadar_{st.session_state.keyword}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    else:
+        st.warning("결과가 없습니다.")
+else:
+    st.info("👈 왼쪽 사이드바에서 키워드를 입력해 주세요.")
