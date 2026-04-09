@@ -12,7 +12,7 @@ from collections import Counter
 
 # 1. 보안 및 기본 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-st.set_page_config(page_title="Trend Radar v4.4", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Trend Radar v4.5", layout="wide", initial_sidebar_state="expanded")
 
 # Secrets 연동
 try:
@@ -42,7 +42,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Trend Radar v4.4")
+st.title("🚀 Trend Radar v4.5")
 
 # 3. 데이터 수집 함수들
 @st.cache_data(show_spinner=False)
@@ -104,13 +104,34 @@ def fetch_combined_news(query, days):
     except: pass
     return results
 
-def get_realtime_daum():
+def get_realtime_daum_hot():
+    # Daum 뉴스 메인에서 핫토픽 키워드를 직접 추출하는 고성능 로직
     try:
-        res = requests.get("https://news.daum.net/", timeout=5)
-        keywords = re.findall(r'data-tiara-layer="article_main".*?>(.*?)</a>', res.text, re.DOTALL)
-        unique_kws = list(dict.fromkeys([re.sub('<[^>]*>', '', k).strip() for k in keywords if 2 <= len(k) < 20]))
-        return unique_kws[:10] if unique_kws else ["데이터 로딩 중"]
-    except: return ["연동 오류"]
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get("https://news.daum.net/", headers=headers, timeout=10)
+        # 다양한 태그 패턴을 분석하여 키워드 추출
+        pattern = r'data-tiara-layer="article_main".*?>(.*?)</a>'
+        keywords = re.findall(pattern, res.text, re.DOTALL)
+        
+        # 클리닝 및 중복 제거
+        clean_kws = []
+        for kw in keywords:
+            kw = re.sub('<[^>]*>', '', kw).strip()
+            if 2 <= len(kw) <= 15:
+                clean_kws.append(kw)
+        
+        unique_kws = list(dict.fromkeys(clean_kws))
+        if len(unique_kws) < 5: # 만약 결과가 너무 적으면 서브 패턴 사용
+            alt_pattern = r'class="link_txt".*?>(.*?)</a>'
+            alt_kws = re.findall(alt_pattern, res.text, re.DOTALL)
+            for kw in alt_kws:
+                kw = re.sub('<[^>]*>', '', kw).strip()
+                if 2 <= len(kw) <= 12: unique_kws.append(kw)
+            unique_kws = list(dict.fromkeys(unique_kws))
+
+        return unique_kws[:10] if unique_kws else ["실시간 데이터 수집 중..."]
+    except:
+        return ["데이터 연동 중...", "네트워크 확인 필요"]
 
 # 4. 사이드바
 with st.sidebar:
@@ -141,10 +162,10 @@ with st.sidebar:
 if st.session_state.keyword or st.session_state.view_mode == 'daum':
     if st.session_state.view_mode == 'daum':
         st.subheader("✨ Daum 실시간 트렌드 (실제 데이터)")
-        daum_trends = get_realtime_daum()
+        daum_trends = get_realtime_daum_hot()
         cols = st.columns(2)
         for idx, kw in enumerate(daum_trends):
-            if cols[idx%2].button(f"🔥 {idx+1}위: {kw}", key=f"d_{idx}", use_container_width=True):
+            if cols[idx%2].button(f"🔥 {idx+1}위: {kw}", key=f"d_{idx}_{kw}", use_container_width=True):
                 st.session_state.keyword = kw
                 st.session_state.view_mode = 'main'
                 st.rerun()
@@ -174,7 +195,6 @@ if st.session_state.keyword or st.session_state.view_mode == 'daum':
                     df_p['period'] = pd.to_datetime(df_p['period'])
                     st.line_chart(df_p.set_index('period')['ratio'], color="#FF4B4B")
                     st.markdown("##### 🛍️ 쇼핑 연관어 (Top 15)")
-                    # 쇼핑 의도를 강조한 키워드 추출
                     shop_kws = get_ad_suggestions(f"{st.session_state.keyword} 구매")
                     for sk in shop_kws: st.write(f"- {sk.replace('구매', '').strip()}")
                 else: st.info("쇼핑 데이터 부족")
