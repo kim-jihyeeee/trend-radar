@@ -12,7 +12,7 @@ from collections import Counter
 
 # 1. 보안 및 기본 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-st.set_page_config(page_title="Trend Radar v4.8", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Trend Radar v4.9", layout="wide", initial_sidebar_state="expanded")
 
 # Secrets 연동
 try:
@@ -42,17 +42,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Trend Radar v4.8")
+st.title("🚀 Trend Radar v4.9")
 
 # 3. 데이터 수집 및 분석 핵심 함수
 @st.cache_data(show_spinner=False)
 def get_real_trend_keywords(query, days):
-    # 1. 구글 추천어 수집
     url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={query}"
     try: suggestions = requests.get(url, timeout=5).json()[1]
     except: suggestions = []
-
-    # 2. 실시간 뉴스 기반 키워드 추출
+    
     news_url = f"https://news.google.com/rss/search?q={query}+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
     news_keywords = []
     try:
@@ -118,7 +116,13 @@ def fetch_combined_news(query, days):
                 except: date_str = "알 수 없음"
                 results.append({"플랫폼": platform, "출처": source, "제목": title.split(" - ")[0], "날짜": date_str, "URL": l_match.group(1)})
     except: pass
-    return results
+    
+    # 🌟 뉴스 중복 제거 로직 (제목 기준)
+    df_temp = pd.DataFrame(results)
+    if not df_temp.empty:
+        df_temp = df_temp.drop_duplicates(subset=['제목'], keep='first')
+        return df_temp.to_dict('records')
+    return []
 
 def get_realtime_daum():
     try:
@@ -199,9 +203,9 @@ if st.session_state.keyword or st.session_state.view_mode == 'daum':
             news_data = fetch_combined_news(st.session_state.keyword, days)
             if news_data:
                 df_n = pd.DataFrame(news_data).sort_values(by="날짜", ascending=False)
-                st.subheader(f"📂 통합 뉴스 및 이슈 (총 {len(df_n)}건 수집)")
+                st.subheader(f"📂 통합 뉴스 및 이슈 (총 {len(df_n)}건 수집 / 중복 제외)")
                 
-                # 뉴스 기반 키워드 추출 및 해시태그 복구
+                # 이슈 키워드 추출
                 news_titles = df_n['제목'].tolist()
                 tw = [w for w, c in Counter([word for title in news_titles for word in re.sub(r'[^\w\s]', ' ', title).split() if len(word) > 1 and word not in st.session_state.keyword]).most_common(5)]
                 
@@ -225,10 +229,22 @@ if st.session_state.keyword or st.session_state.view_mode == 'daum':
                 st.divider()
                 st.dataframe(df_n, use_container_width=True, hide_index=True, column_config={"URL": st.column_config.LinkColumn("링크", display_text="🔗 보기")})
                 
-                out = io.BytesIO()
-                with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
-                    df_n.to_excel(wr, index=False, sheet_name='Report')
-                st.download_button(label="📥 분석 리포트(Excel) 다운로드", data=out.getvalue(), file_name=f"Report_{st.session_state.keyword}.xlsx", use_container_width=True)
+                # 🌟 엑셀 리포트 다운로드 보강 🌟
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    # 시트 1: 뉴스 리스트
+                    df_n.to_excel(writer, index=False, sheet_name='News_List')
+                    
+                    # 시트 2: 키워드 분석 리포트
+                    analysis_data = []
+                    for main_kw in tw:
+                        longtail = get_real_trend_keywords(main_kw, days)
+                        analysis_data.append({"이슈 키워드": main_kw, "롱테일 추천": ", ".join(longtail[:7])})
+                    
+                    df_analysis = pd.DataFrame(analysis_data)
+                    df_analysis.to_excel(writer, index=False, sheet_name='Trend_Analysis')
+                    
+                st.download_button(label="📥 분석 리포트(Excel) 다운로드", data=output.getvalue(), file_name=f"TrendRadar_Report_{st.session_state.keyword}.xlsx", use_container_width=True)
             else: st.info("수집된 뉴스가 없습니다.")
 else:
     st.info("👈 왼쪽 메뉴에서 키워드를 입력하고 레이더를 가동해 주세요!")
