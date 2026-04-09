@@ -12,11 +12,11 @@ from collections import Counter
 # 1. 보안 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 2. 페이지 기본 설정
+# 2. 페이지 기본 설정 (사이드바 상태를 'expanded'로 강제하여 일단 보이게 시작)
 st.set_page_config(
     page_title="Trend Radar v2.0", 
     layout="wide",
-    initial_sidebar_state="auto" # 화면 크기에 따라 스트림릿이 알아서 판단하도록 설정
+    initial_sidebar_state="expanded" 
 )
 
 # 화면 전환을 위한 상태값 초기화
@@ -27,13 +27,11 @@ if 'selected_keyword' not in st.session_state:
 if 'keyword' not in st.session_state:
     st.session_state.keyword = ""
 
-# 🌟 모바일에서 검색 후 메뉴를 자동으로 닫기 위한 자바스크립트 효과 🌟
+# 3. UI 디자인 커스텀
 st.markdown("""
     <style>
-    /* 상단 거슬리는 텍스트 및 불필요한 헤더 숨기기 */
-    header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+    /* 상단 메뉴바의 불필요한 요소만 제거하고 '열기/닫기' 아이콘은 살려둡니다 */
     [data-testid="stSidebarNav"] { display: none; }
-    .css-1d391kg { padding-top: 1rem; }
     
     /* 텍스트 입력창 디자인 커스텀 */
     div[data-testid="stTextInput"] input {
@@ -45,11 +43,13 @@ st.markdown("""
         font-size: 16px !important;
     }
     
-    /* 모바일에서 결과 표가 잘 보이도록 간격 조정 */
+    /* 모바일에서 결과 표 여백 조정 */
     @media (max-width: 768px) {
         .main .block-container {
             padding: 1rem 0.5rem !important;
         }
+        /* 모바일에서 제목 크기 살짝 조정 */
+        h1 { font-size: 1.8rem !important; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -57,7 +57,7 @@ st.markdown("""
 st.title("🔥 Trend Radar: 통합 이슈 & 뉴스 분석")
 st.markdown("마케팅 AE를 위한 실전 롱테일 키워드 제안 도구입니다.")
 
-# 3. 사이드바 검색 및 기간 설정
+# 4. 사이드바 검색 및 기간 설정
 with st.sidebar:
     try:
         image_path = "profile.jpg" 
@@ -89,13 +89,12 @@ with st.sidebar:
         
         if submit_btn:
             if keyword_input.strip() == "":
-                st.error("⚠️ 키워드 입력 필수")
+                st.error("⚠️ 키워드를 입력해 주세요.")
             else:
                 st.session_state.view_mode = 'main'
                 st.session_state.keyword = keyword_input
-                # 검색이 시작되면 모바일에서는 메뉴가 닫히도록 유도 (자동 새로고침 효과)
 
-# 4. 기능 함수들
+# 5. 기능 함수들
 @st.cache_data(show_spinner=False)
 def get_ad_suggestions(main_word):
     url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={main_word}"
@@ -142,11 +141,8 @@ def fetch_data(query, days):
     except: pass
     return results
 
-# 5. 화면 렌더링 로직
+# 6. 화면 렌더링 로직
 if st.session_state.keyword:
-    # 🌟 모바일 대응: 검색 결과가 나오면 사이드바가 접히도록 안내 메시지 추가 🌟
-    st.info(f"📡 '{st.session_state.keyword}' 분석 결과를 불러왔습니다. 왼쪽 메뉴가 화면을 가린다면 화살표(X)를 눌러 닫아주세요.")
-    
     data = fetch_data(st.session_state.keyword, days)
     if data:
         df = pd.DataFrame(data)
@@ -165,8 +161,9 @@ if st.session_state.keyword:
             top_words = extract_main_keywords(df['제목'].tolist(), st.session_state.keyword)
             if top_words:
                 st.subheader("📌 핵심 키워드")
-                for w in top_words:
-                    if st.button(f"#{w}", key=f"kw_{w}", use_container_width=True):
+                cols = st.columns(len(top_words))
+                for i, w in enumerate(top_words):
+                    if cols[i].button(f"#{w}", key=f"kw_{w}", use_container_width=True):
                         st.session_state.view_mode = 'detail'
                         st.session_state.selected_keyword = w
                         st.rerun()
@@ -181,4 +178,4 @@ if st.session_state.keyword:
             st.download_button(label="📥 리포트 다운로드", data=output.getvalue(), file_name=f"TrendRadar_{st.session_state.keyword}.xlsx", use_container_width=True)
     else: st.warning("결과가 없습니다.")
 else:
-    st.info("👈 왼쪽 사이드바에 키워드를 입력하고 실행해 주세요!")
+    st.info("👈 왼쪽 사이드바(메뉴)에서 키워드를 입력하고 레이더를 돌려주세요!")
