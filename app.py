@@ -12,11 +12,11 @@ from collections import Counter
 # 1. 보안 설정
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 2. 페이지 기본 설정 (모바일에서 사이드바가 기본으로 열려있도록 설정)
+# 2. 페이지 기본 설정
 st.set_page_config(
     page_title="Trend Radar v2.0", 
     layout="wide",
-    initial_sidebar_state="expanded" # 🌟 모바일 접속 시 사이드바를 바로 보여줍니다.
+    initial_sidebar_state="expanded"
 )
 
 # 화면 전환을 위한 상태값 초기화
@@ -62,24 +62,31 @@ with st.sidebar:
     except FileNotFoundError:
         st.warning("⚠️ 'profile.jpg' 파일을 찾을 수 없습니다.")
 
-    # 🌟 텍스트 입력창 CSS 커스텀 (모바일 가독성 포함) 🌟
+    # 🌟 상단 거슬리는 글자 제거 및 모바일 UI 커스텀 🌟
     st.markdown("""
         <style>
+        /* 상단 아이콘 텍스트 제거 */
+        [data-testid="stSidebarNav"] + div, 
+        button[kind="header"] {
+            display: none !important;
+        }
+        /* 텍스트 입력창 디자인 */
         div[data-testid="stTextInput"] input {
             background-color: #FFF4CE !important;
             border: 3px solid #FFB300 !important;
             border-radius: 8px !important;
             font-weight: bold !important;
             color: #333333 !important;
-            font-size: 16px !important; /* 모바일 줌 현상 방지 */
+            font-size: 16px !important;
         }
         div[data-testid="stTextInput"] input:focus {
             outline: none !important;
             border: 3px solid #FF8F00 !important;
-            box-shadow: 0 0 10px rgba(255, 143, 0, 0.4) !important;
         }
-        /* 사이드바 글자 겹침 방지 */
-        .css-1d391kg { padding-top: 3rem; }
+        /* 사이드바 여백 최적화 */
+        section[data-testid="stSidebar"] .main .block-container {
+            padding-top: 1rem !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -111,114 +118,8 @@ with st.sidebar:
 @st.cache_data(show_spinner=False)
 def get_ad_suggestions(main_word):
     url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={main_word}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers, timeout=5)
         suggestions = response.json()[1] 
-        result = [kw for kw in suggestions if kw != main_word][:10]
-        if not result:
-            return [f"{main_word} 추천", f"{main_word} 후기", f"{main_word} 가격"]
-        return result
-    except Exception as e:
-        return [f"데이터 오류 발생"]
-
-def extract_main_keywords(titles, current_keyword):
-    words = []
-    stop_words = [current_keyword, '뉴스', 'com', 'daum', 'naver', '연합뉴스', '뉴스1', '조선일보', '중앙일보', '동아일보', '경향신문', '한겨레', '매일경제', '한국경제', 'YTN', 'SBS', 'KBS', 'MBC', 'JTBC', '뉴시스', '뉴스핌', '데일리', '기자', '기사']
-    for title in titles:
-        clean_title = title.split(' - ')[0].split(' | ')[0]
-        clean_title = re.sub(r'[^\w\s]', ' ', clean_title)
-        for word in clean_title.split():
-            if len(word) > 1 and word not in stop_words:
-                words.append(word)
-    return [w for w, c in Counter(words).most_common(5)]
-
-def fetch_data(query, days):
-    results = []
-    url = f"https://news.google.com/rss/search?q={query}+when:{days}d&hl=ko&gl=KR&ceid=KR:ko"
-    try:
-        res = requests.get(url, timeout=15, verify=False)
-        items = re.findall(r"<item>(.*?)</item>", res.text, re.DOTALL)
-        for item in items: 
-            t = re.search(r"<title>(.*?)</title>", item)
-            l = re.search(r"<link>(.*?)</link>", item)
-            s = re.search(r"<source.*?>(.*?)</source>", item)
-            pd_match = re.search(r"<pubDate>(.*?)</pubDate>", item)
-            date_str = "알 수 없음"
-            if pd_match:
-                raw_date = pd_match.group(1)
-                try:
-                    dt = parsedate_to_datetime(raw_date)
-                    kst_tz = datetime.timezone(datetime.timedelta(hours=9))
-                    dt_kst = dt.astimezone(kst_tz)
-                    date_str = dt_kst.strftime("%Y-%m-%d %H:%M")
-                except:
-                    date_str = raw_date
-            if t and l:
-                results.append({
-                    "플랫폼": "구글 뉴스",
-                    "출처": s.group(1) if s else "뉴스",
-                    "제목": t.group(1).replace("<![CDATA[", "").replace("]]>", ""),
-                    "날짜": date_str,
-                    "URL": l.group(1)
-                })
-    except Exception as e:
-        pass
-    return results
-
-# 5. 화면 렌더링 로직
-if st.session_state.keyword:
-    with st.spinner(f"📡 '{st.session_state.keyword}' 분석 중..."):
-        data = fetch_data(st.session_state.keyword, days)
-    
-    if data:
-        df = pd.DataFrame(data)
-        if "날짜" in df.columns:
-            df = df.sort_values(by="날짜", ascending=False).reset_index(drop=True)
-
-        if st.session_state.view_mode == 'detail':
-            st.divider()
-            if st.button("⬅️ 뒤로가기", use_container_width=True):
-                st.session_state.view_mode = 'main'
-                st.rerun()
-            st.success(f"💡 **'{st.session_state.selected_keyword}'** 롱테일 키워드")
-            ad_words = get_ad_suggestions(st.session_state.selected_keyword)
-            cols = st.columns(2)
-            for idx, aw in enumerate(ad_words):
-                if aw: cols[idx % 2].code(aw)
-        else:
-            top_words = extract_main_keywords(df['제목'].tolist(), st.session_state.keyword)
-            if top_words:
-                st.subheader("📌 핵심 키워드")
-                # 모바일에서는 버튼을 더 크게 배치
-                for w in top_words:
-                    if st.button(f"#{w}", key=f"kw_{w}", use_container_width=True):
-                        st.session_state.view_mode = 'detail'
-                        st.session_state.selected_keyword = w
-                        st.rerun()
-                st.divider()
-
-            st.subheader(f"📊 분석 결과 (총 {len(df)}건)")
-            st.dataframe(
-                df, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={"URL": st.column_config.LinkColumn("링크", display_text="🔗 보기")}
-            )
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='Report')
-            st.download_button(
-                label=f"📥 리포트 다운로드",
-                data=output.getvalue(),
-                file_name=f"TrendRadar_{st.session_state.keyword}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-    else:
-        st.warning("결과가 없습니다.")
-else:
-    st.info("👈 왼쪽 사이드바에서 키워드를 입력해 주세요.")
+        result =
